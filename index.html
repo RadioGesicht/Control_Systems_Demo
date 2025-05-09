@@ -10,6 +10,12 @@
     .container { display: flex; flex-direction: column; align-items: center; }
     input { margin: 10px 0; padding: 5px; }
     label { font-size: 16px; }
+    .inputs-container {
+      display: flex;
+      flex-direction: column; /* Felder untereinander */
+      align-items: flex-start; /* Links ausrichten */
+      gap: 10px; /* Abstand zwischen den Feldern */
+    }
   </style>
 </head>
 <body>
@@ -23,6 +29,25 @@
         <input type="range" id="x_target_slider" min="0" max="3.5" step="0.05" value="1.5" />
       </div>
   
+      <!-- System m, k, d Optionen -->
+      <div class="inputs-container">
+        <!-- System m, k, d Optionen -->
+        <div>
+          <label for="k_input">Federkonstante (k) in N/m:</label>
+          <input type="number" id="k_input" min="0" step="1" value="20" />
+        </div>
+        
+        <div>
+          <label for="d_input">Dämpfung (d) in Ns/m:</label>
+          <input type="number" id="d_input" min="0" step="0.1" value="4" />
+        </div>
+        
+        <div>
+          <label for="m_input">Masse (m) in kg:</label>
+          <input type="number" id="m_input" min="0" step="0.1" value="2" />
+        </div>
+      </div>
+
       <!-- PID-Regler Optionen -->
       <div>
         <label>
@@ -55,7 +80,7 @@
       <!-- Gravitation Optionen -->
       <div>
         <label>
-          <input type="checkbox" id="gravity_enabled" checked />
+          <input type="checkbox" id="gravity_enabled" unchecked />
           Gravitation
         </label>
       </div>
@@ -66,11 +91,41 @@
 
   <script>
     // Systemparameter
-    const m = 3.0;    // Masse in kg
-    const k = 20.0;  // Federkonstante in N/m
-    const d = 1.0;   // Dämpfung in Ns/m
+    let m = 2.0;    // Masse in kg
+    let k = 20.0;  // Federkonstante in N/m
+    let d = 4.0;   // Dämpfung in Ns/m
     let g = 9.81;   // Schwerkraft in m/s²
-    let gravityEnabled = true;
+
+    // Holen der Eingabefelder
+    const kInput = document.getElementById("k_input");
+    const dInput = document.getElementById("d_input");
+    const mInput = document.getElementById("m_input");
+
+    // Funktion zur sicheren Eingabewert-Überprüfung und Standardwertsetzung
+    function getValidInput(inputElement, defaultValue) {
+      const value = parseFloat(inputElement.value);
+      if (isNaN(value) || value <= 0) {
+        // Falls der Wert ungültig oder kleiner als 0 ist, Standardwert setzen
+        inputElement.value = defaultValue;
+        return defaultValue;
+      }
+      return value;
+    }
+
+    // Event-Listener hinzufügen, um die Werte zu aktualisieren
+    kInput.addEventListener("input", () => {
+      k = getValidInput(kInput, 1);  // Standardwert für k ist 40
+    });
+
+    dInput.addEventListener("input", () => {
+      d = getValidInput(dInput, 0.1);  // Standardwert für d ist 10
+    });
+
+    mInput.addEventListener("input", () => {
+      m = getValidInput(mInput, 0.1);   // Standardwert für m ist 3
+    });
+
+    let gravityEnabled = false;
 
     document.getElementById("gravity_enabled").addEventListener("change", (e) => {
       gravityEnabled = e.target.checked;
@@ -146,7 +201,7 @@
 
     // Initialzustand: Masse im statischen Gleichgewicht
     let x0 = 1;
-    let x = 0;  // Gleichgewichtsposition: F_feder = F_grav
+    let x = x0;  // Gleichgewichtsposition: F_feder = F_grav
     let v = 0;          // Geschwindigkeit
 
     // Sollwert
