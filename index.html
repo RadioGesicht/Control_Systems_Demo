@@ -1,0 +1,370 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Einmassenschwinger mit PID-Regler</title>
+  <style>
+    body { font-family: Arial, sans-serif; }
+    canvas { border: 1px solid black; margin-top: 20px; }
+    .container { display: flex; flex-direction: column; align-items: center; }
+    input { margin: 10px 0; padding: 5px; }
+    label { font-size: 16px; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Einmassenschwinger mit PID-Regler</h1>
+  
+    <div style="display: flex; align-items: top; gap: 60px; margin-top: 10px;">
+      <!-- Schieberegler -->
+      <div>
+        <label for="x_target_slider">Sollposition (m): <span id="x_target_value">0.00</span></label><br />
+        <input type="range" id="x_target_slider" min="0" max="3.5" step="0.05" value="1.5" />
+      </div>
+  
+      <!-- PID-Regler Optionen -->
+      <div>
+        <label>
+          <input type="checkbox" id="pid_enabled" unchecked />
+          PID-Regler
+        </label>
+  
+        <div style="margin-left: 20px; margin-top: 5px;">
+          <!-- P-Regler -->
+          <div style="display: flex; align-items: center; gap: 10px;">
+            <label><input type="checkbox" id="p_enabled" checked /> P</label>
+            <input type="range" id="kp_slider" min="0" max="2000" step="10" value="900" />
+            <span id="kp_value">900</span>
+          </div>
+          <!-- I-Regler -->
+          <div style="display: flex; align-items: center; gap: 10px;">
+            <label><input type="checkbox" id="i_enabled" checked /> I</label>
+            <input type="range" id="ki_slider" min="0" max="500" step="5" value="100" />
+            <span id="ki_value">100</span>
+          </div>
+          <!-- D-Regler -->
+          <div style="display: flex; align-items: center; gap: 10px;">
+            <label><input type="checkbox" id="d_enabled" checked /> D</label>
+            <input type="range" id="kd_slider" min="0" max="100" step="1" value="10" />
+            <span id="kd_value">10</span>
+          </div>
+        </div>
+      </div>
+  
+      <!-- Gravitation Optionen -->
+      <div>
+        <label>
+          <input type="checkbox" id="gravity_enabled" checked />
+          Gravitation
+        </label>
+      </div>
+    </div>
+  
+    <canvas id="simulationCanvas" width="800" height="420" style="margin-top: 20px;"></canvas>
+  </div>
+
+  <script>
+    // Systemparameter
+    const m = 3.0;    // Masse in kg
+    const k = 20.0;  // Federkonstante in N/m
+    const d = 1.0;   // Dämpfung in Ns/m
+    let g = 9.81;   // Schwerkraft in m/s²
+    let gravityEnabled = true;
+
+    document.getElementById("gravity_enabled").addEventListener("change", (e) => {
+      gravityEnabled = e.target.checked;
+    });
+
+    const scale = 80;
+
+    // PID-Reglerparameter
+    let pidEnabled = false;
+    let pEnabled = true;
+    let iEnabled = true;
+    let dEnabled = true;
+
+    document.getElementById("pid_enabled").addEventListener("change", (e) => {
+      pidEnabled = e.target.checked;
+    });
+
+    document.getElementById("p_enabled").addEventListener("change", (e) => {
+      pEnabled = e.target.checked;
+    });
+
+    document.getElementById("i_enabled").addEventListener("change", (e) => {
+      iEnabled = e.target.checked;
+    });
+
+    document.getElementById("d_enabled").addEventListener("change", (e) => {
+      dEnabled = e.target.checked;
+    });
+
+    function updatePIDCheckboxesState(enabled) {
+      document.getElementById("p_enabled").disabled = !enabled;
+      document.getElementById("i_enabled").disabled = !enabled;
+      document.getElementById("d_enabled").disabled = !enabled;
+    }
+
+    // Initialer Zustand setzen
+    updatePIDCheckboxesState(pidEnabled);
+
+    // Eventlistener erweitern:
+    document.getElementById("pid_enabled").addEventListener("change", (e) => {
+      pidEnabled = e.target.checked;
+      updatePIDCheckboxesState(pidEnabled);
+    });
+
+    let kp = 900;
+    let ki = 100;
+    let kd = 10;
+
+    const kpSlider = document.getElementById("kp_slider");
+    const kiSlider = document.getElementById("ki_slider");
+    const kdSlider = document.getElementById("kd_slider");
+
+    const kpValue = document.getElementById("kp_value");
+    const kiValue = document.getElementById("ki_value");
+    const kdValue = document.getElementById("kd_value");
+
+    kpSlider.addEventListener("input", () => {
+      kp = parseFloat(kpSlider.value);
+      kpValue.textContent = kp;
+    });
+    kiSlider.addEventListener("input", () => {
+      ki = parseFloat(kiSlider.value);
+      kiValue.textContent = ki;
+    });
+    kdSlider.addEventListener("input", () => {
+      kd = parseFloat(kdSlider.value);
+      kdValue.textContent = kd;
+    });
+
+    let P = 0;
+    let I = 0;
+    let D = 0;
+
+    // Initialzustand: Masse im statischen Gleichgewicht
+    let x0 = 1;
+    let x = 0;  // Gleichgewichtsposition: F_feder = F_grav
+    let v = 0;          // Geschwindigkeit
+
+    // Sollwert
+    let x_target = 1.5;
+    document.getElementById("x_target_value").textContent = x_target.toFixed(2);
+
+    // PID-Regelgrößen
+    let error = 0;
+    let prev_error = 0;
+    let integral = 0;
+    let derivative = 0;
+    let force = 0;
+
+    // Simulation
+    const dt = 0.01;
+
+    // Canvas
+    const canvas = document.getElementById("simulationCanvas");
+    const ctx = canvas.getContext("2d");
+
+    // Eingabefeld für Zielposition
+    const slider = document.getElementById("x_target_slider");
+    const sliderValueLabel = document.getElementById("x_target_value");
+
+    slider.addEventListener("input", (e) => {
+      x_target = parseFloat(e.target.value);
+      sliderValueLabel.textContent = x_target.toFixed(2);
+    });
+
+    window.debugInfo = {
+      error: 0, P: 0, I: 0, D: 0, force: 0
+    };
+
+    function updateSystem() {
+      error = x_target - x;
+      integral += error * dt;
+      derivative = (error - prev_error) / dt;
+
+      if (!iEnabled) integral = 0;
+
+      P = kp * error;
+      I = ki * integral;
+      D = kd * derivative;
+
+      //force = kp * error + ki * integral + kd * derivative;
+      if (!pidEnabled) {
+        P = I = D = 0;
+        integral = 0;
+      } else {
+        if (!pEnabled) P = 0;
+        if (!iEnabled) I = 0;
+        if (!dEnabled) D = 0;
+      }
+
+      force = P + I + D;
+      prev_error = error;
+
+      let gravityForce = m * g;
+      if(!gravityEnabled) gravityForce = 0;
+
+      const acceleration = (gravityForce + force - k * (x - x0) - d * v) / m;
+
+      v += acceleration * dt;
+      x += v * dt;
+
+      window.debugInfo = {
+        error, P, I, D, force
+      };
+    }
+
+    function draw() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      const xLager = 400;
+      const yLager = 100;
+
+      // Feder darstellen (als Spirale)
+      const springLength = Math.abs(x * scale);
+      const numCoils = 20; // Anzahl der Windungen (ändern je nach Bedarf)
+      const xOffset = 5;
+      const yOffset = springLength / numCoils;
+
+      ctx.beginPath();
+      ctx.moveTo(xLager, yLager);
+      ctx.lineTo(xLager - xOffset, yLager + yOffset);
+
+      // Erzeuge eine Spirale
+      for (let i = 2; i <= numCoils; i++) {
+
+        ctx.lineTo(xLager + Math.pow(-1, i) * xOffset, yLager + i * yOffset);
+      }
+
+      ctx.lineTo(xLager, yLager + x * scale);
+      ctx.strokeStyle = "#8B4513"; // Braune Farbe für die Feder
+      ctx.lineWidth = 2; // Dicke der Feder
+      ctx.stroke();
+      ctx.lineWidth = 1;
+
+      // Zeichne Ursprung (Gleichgewichtslinie gestrichelt)
+      ctx.beginPath();
+      ctx.setLineDash([5, 5]); // Strich-Lücke-Muster
+      ctx.moveTo(xLager - 100, yLager + x0 * scale);
+      ctx.lineTo(xLager + 100, yLager + x0 * scale);
+      ctx.strokeStyle = "black";
+      ctx.stroke();
+      ctx.setLineDash([]); // Zurücksetzen auf durchgehende Linien für nachfolgende Zeichnungen
+      ctx.fillText(`x0`, xLager - 120, yLager + x0 * scale);
+
+      // Zeichne Lager
+      ctx.beginPath();
+      ctx.lineWidth = 4; // Strichdicke einstellen
+      ctx.moveTo(xLager - 50, yLager);
+      ctx.lineTo(xLager + 50, yLager);
+      ctx.strokeStyle = "black";
+      ctx.stroke();
+      ctx.fillText(`Lager`, xLager - 138, yLager);
+      ctx.lineWidth = 1; // Zurücksetzen auf Standarddicke
+
+      // Zeichne Lager Referenzlinie
+      ctx.beginPath();
+      ctx.setLineDash([5, 5]); // Strich-Lücke-Muster
+      ctx.moveTo(xLager - 100, yLager);
+      ctx.lineTo(xLager + 100, yLager);
+      ctx.strokeStyle = "black";
+      ctx.stroke();
+      ctx.setLineDash([]); // Zurücksetzen auf durchgehende Linien für nachfolgende Zeichnungen
+
+      // Zeichne Sollposition
+      ctx.beginPath();
+      ctx.setLineDash([5, 5]); // Strich-Lücke-Muster
+      ctx.moveTo(xLager - 100, yLager + x_target * scale);
+      ctx.lineTo(xLager + 100, yLager + x_target * scale);
+      ctx.strokeStyle = "black";
+      ctx.stroke();
+      ctx.setLineDash([]); // Zurücksetzen auf durchgehende Linien für nachfolgende Zeichnungen
+      ctx.fillText(`x_target`, xLager - 155, yLager + x_target * scale);
+
+      // Textanzeige
+      ctx.fillStyle = "black";
+      ctx.font = "14px Arial";
+      ctx.fillText(`Position: ${x.toFixed(2)} m`, 20, 60);
+      ctx.fillText(`Sollposition: ${x_target.toFixed(2)} m`, 20, 80);
+
+      ctx.fillStyle = "red";
+      ctx.fillText(`P-Anteil: ${P.toFixed(3)} N`, 20, 120);
+      ctx.fillText(`P-Error: ${error.toFixed(3)} -`, 20, 140);
+
+      ctx.fillStyle = "green";
+      ctx.fillText(`I-Anteil: ${I.toFixed(3)} N`, 20, 180);
+      ctx.fillText(`I-Error: ${integral.toFixed(6)} -`, 20, 200);
+
+      ctx.fillStyle = "blue";  // <-- Hier wird der Text für D blau gefärbt
+      ctx.fillText(`D-Anteil: ${D.toFixed(3)} N`, 20, 240);
+      ctx.fillText(`D-Error: ${derivative.toFixed(6)} -`, 20, 260);
+
+      // Zeichne Balken zur Darstellung von P, I, D Anteilen
+      const barX = 10;
+      const barY = 300;
+      const barWidth = 180;
+      const barHeight = 20;
+
+      const debug = window.debugInfo;
+      const total = Math.abs(P) + Math.abs(I) + Math.abs(D) || 1;
+
+      // Farbanteile berechnen
+      const pRatio = Math.abs(P) / total;
+      const iRatio = Math.abs(I) / total;
+      const dRatio = Math.abs(D) / total;
+
+      const pWidth = pRatio * barWidth;
+      const iWidth = iRatio * barWidth;
+      const dWidth = dRatio * barWidth;
+
+      // Farbintensität basierend auf Kraft (maximal 1.0 bei |force| >= 25)
+      const intensity = Math.min(1.0, Math.abs(force) / 1);
+
+      // Hilfsfunktion für RGB mit Intensität
+      function rgba(color, alpha) {
+        return `rgba(${color}, ${alpha})`;
+      }
+
+      // Rahmen zeichnenctx.strokeStyle = "black";
+      ctx.lineWidth = 2; // z. B. 2 Pixel dick
+      ctx.strokeRect(barX, barY, barWidth, barHeight);
+      ctx.lineWidth = 1; // danach wieder zurücksetzen, falls nötig
+
+      // Interne Balken zeichnen (von links nach rechts)
+      let currentX = barX;
+
+      // P-Anteil (rot)
+      ctx.fillStyle = rgba("255,0,0", intensity);
+      ctx.fillRect(currentX, barY, pWidth, barHeight);
+      currentX += pWidth;
+
+      // I-Anteil (grün)
+      ctx.fillStyle = rgba("0,200,0", intensity);
+      ctx.fillRect(currentX, barY, iWidth, barHeight);
+      currentX += iWidth;
+
+      // D-Anteil (blau)
+      ctx.fillStyle = rgba("0,0,255", intensity);
+      ctx.fillRect(currentX, barY, dWidth, barHeight);
+
+      // Zeichne Masse
+      ctx.beginPath();
+      ctx.arc(xLager, yLager + x * scale, 20, 0, Math.PI * 2);
+      ctx.fillStyle = "blue";
+      ctx.fill();
+    }
+
+    function simulate() {
+      
+      updateSystem();
+      draw();
+    }
+
+    setInterval(simulate, dt * 1000);
+
+  </script>
+</body>
+</html>
