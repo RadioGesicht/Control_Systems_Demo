@@ -24,14 +24,22 @@
   
     <div style="display: flex; align-items: top; gap: 60px; margin-top: 10px;">
       <!-- Schieberegler -->
+      
       <div>
         <label for="x_target_slider">Sollposition (m): <span id="x_target_value">0.00</span></label><br />
         <input type="range" id="x_target_slider" min="0" max="3.5" step="0.05" value="1.5" />
+        <br />
+        <label><input type="checkbox" id="dynamic_target_checkbox" unchecked /> Dynamische Sollposition</label>
+         <!-- Frequenz-Schieberegler -->
+        <br />
+        <div>
+          <label for="frequency_slider">Frequenz (Hz): <span id="frequency_value">1.00</span></label><br />
+          <input type="range" id="frequency_slider" min="0" max="5" step="0.1" value="1.0" />
+        </div>
       </div>
-  
+
       <!-- System m, k, d Optionen -->
       <div class="inputs-container">
-        <!-- System m, k, d Optionen -->
         <div>
           <label for="k_input">Federkonstante (k) in N/m:</label>
           <input type="number" id="k_input" min="0" step="1" value="20" />
@@ -39,7 +47,7 @@
         
         <div>
           <label for="d_input">Dämpfung (d) in Ns/m:</label>
-          <input type="number" id="d_input" min="0" step="0.1" value="4" />
+          <input type="number" id="d_input" min="0" step="0.1" value="2" />
         </div>
         
         <div>
@@ -59,20 +67,20 @@
           <!-- P-Regler -->
           <div style="display: flex; align-items: center; gap: 10px;">
             <label><input type="checkbox" id="p_enabled" checked /> P</label>
-            <input type="range" id="kp_slider" min="0" max="2000" step="10" value="900" />
-            <span id="kp_value">900</span>
+            <input type="range" id="kp_slider" min="0" max="300" step="1" value="20" />
+            <span id="kp_value">20</span>
           </div>
           <!-- I-Regler -->
           <div style="display: flex; align-items: center; gap: 10px;">
-            <label><input type="checkbox" id="i_enabled" checked /> I</label>
-            <input type="range" id="ki_slider" min="0" max="500" step="5" value="100" />
-            <span id="ki_value">100</span>
+            <label><input type="checkbox" id="i_enabled" unchecked /> I</label>
+            <input type="range" id="ki_slider" min="0" max="50" step="0.1" value="10" />
+            <span id="ki_value">10</span>
           </div>
           <!-- D-Regler -->
           <div style="display: flex; align-items: center; gap: 10px;">
-            <label><input type="checkbox" id="d_enabled" checked /> D</label>
-            <input type="range" id="kd_slider" min="0" max="100" step="1" value="10" />
-            <span id="kd_value">10</span>
+            <label><input type="checkbox" id="d_enabled" unchecked /> D</label>
+            <input type="range" id="kd_slider" min="0" max="100" step="0.1" value="6" />
+            <span id="kd_value">6</span>
           </div>
         </div>
       </div>
@@ -93,7 +101,7 @@
     // Systemparameter
     let m = 2.0;    // Masse in kg
     let k = 20.0;  // Federkonstante in N/m
-    let d = 4.0;   // Dämpfung in Ns/m
+    let d = 2.0;   // Dämpfung in Ns/m
     let g = 9.81;   // Schwerkraft in m/s²
 
     // Holen der Eingabefelder
@@ -114,15 +122,15 @@
 
     // Event-Listener hinzufügen, um die Werte zu aktualisieren
     kInput.addEventListener("input", () => {
-      k = getValidInput(kInput, 1);  // Standardwert für k ist 40
+      k = getValidInput(kInput, 0.1);  
     });
 
     dInput.addEventListener("input", () => {
-      d = getValidInput(dInput, 0.1);  // Standardwert für d ist 10
+      d = getValidInput(dInput, 0.1);  
     });
 
     mInput.addEventListener("input", () => {
-      m = getValidInput(mInput, 0.1);   // Standardwert für m ist 3
+      m = getValidInput(mInput, 0.1);  
     });
 
     let gravityEnabled = false;
@@ -136,8 +144,8 @@
     // PID-Reglerparameter
     let pidEnabled = false;
     let pEnabled = true;
-    let iEnabled = true;
-    let dEnabled = true;
+    let iEnabled = false;
+    let dEnabled = false;
 
     document.getElementById("pid_enabled").addEventListener("change", (e) => {
       pidEnabled = e.target.checked;
@@ -170,9 +178,9 @@
       updatePIDCheckboxesState(pidEnabled);
     });
 
-    let kp = 900;
-    let ki = 100;
-    let kd = 10;
+    let kp = 20;
+    let ki = 10;
+    let kd = 6;
 
     const kpSlider = document.getElementById("kp_slider");
     const kiSlider = document.getElementById("ki_slider");
@@ -235,8 +243,30 @@
       error: 0, P: 0, I: 0, D: 0, force: 0
     };
 
+    // Größen für dynamische Anregung
+    let t = 0;
+    let frequency = 1.0;
+    const frequencySlider = document.getElementById("frequency_slider");
+    const frequencyValueLabel = document.getElementById("frequency_value");
+    frequencySlider.addEventListener("input", (e) => {
+      frequency = parseFloat(e.target.value);
+      frequencyValueLabel.textContent = frequency.toFixed(2);
+    });
+
     function updateSystem() {
+
+      t += dt;
+      if (document.getElementById("dynamic_target_checkbox").checked) {
+        x_target = 1 + 0.5 * Math.cos(2 * Math.PI * frequency * t);
+        document.getElementById("x_target_slider").disabled = true;
+        frequencySlider.disabled = false;
+      } else {
+        document.getElementById("x_target_slider").disabled = false;
+        frequencySlider.disabled = true;
+      }
+
       error = x_target - x;
+
       integral += error * dt;
       derivative = (error - prev_error) / dt;
 
@@ -291,7 +321,7 @@
       // Erzeuge eine Spirale
       for (let i = 2; i <= numCoils; i++) {
 
-        ctx.lineTo(xLager + Math.pow(-1, i) * xOffset, yLager + i * yOffset);
+        ctx.lineTo(xLager + Math.pow(-1, i) * x0/x * xOffset, yLager + i * yOffset);
       }
 
       ctx.lineTo(xLager, yLager + x * scale);
@@ -317,17 +347,7 @@
       ctx.lineTo(xLager + 50, yLager);
       ctx.strokeStyle = "black";
       ctx.stroke();
-      ctx.fillText(`Lager`, xLager - 138, yLager);
       ctx.lineWidth = 1; // Zurücksetzen auf Standarddicke
-
-      // Zeichne Lager Referenzlinie
-      ctx.beginPath();
-      ctx.setLineDash([5, 5]); // Strich-Lücke-Muster
-      ctx.moveTo(xLager - 100, yLager);
-      ctx.lineTo(xLager + 100, yLager);
-      ctx.strokeStyle = "black";
-      ctx.stroke();
-      ctx.setLineDash([]); // Zurücksetzen auf durchgehende Linien für nachfolgende Zeichnungen
 
       // Zeichne Sollposition
       ctx.beginPath();
@@ -376,7 +396,8 @@
       const dWidth = dRatio * barWidth;
 
       // Farbintensität basierend auf Kraft (maximal 1.0 bei |force| >= 25)
-      const intensity = Math.min(1.0, Math.abs(force) / 1);
+      //const intensity = Math.min(1.0, Math.abs(force) / 1);
+      const intensity = 1;
 
       // Hilfsfunktion für RGB mit Intensität
       function rgba(color, alpha) {
